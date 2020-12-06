@@ -15,12 +15,13 @@
 
 
 // LED Pins
-int red_pin = 4;
-int green_pin = 3;
-int blue_pin = 2;
+int red_pin = 11;
+int green_pin = 10;
+int blue_pin = 9;
+int yellow_pin = 8;
 
 //Button Info
-int button_pin = 6;
+int button_pin = 2;
 int button_signal = 0;
 int button_previous = 0;
 int button_state = 0;
@@ -33,11 +34,11 @@ int water_level = 0;
 int water_level_min = 125; 
 
 // Temp/Humidity Sensor Pin
-int dht_pin = 8;
+int dht_pin = 3;
 DHT dht( dht_pin, DHT11 );
 int temp = 0;
-int min_temp = 20;
-int max_temp = 30;
+int min_temp = 10;
+int max_temp = 15;
 
 int humidity = 0;
 
@@ -51,14 +52,15 @@ LiquidCrystal lcd( rs, en, d4, d5, d6, d7 );
 
 void setup() {
 	// get base info from sensors (water level, temperature, humidity)
-	pinMode( red_pin,    OUTPUT );
-	pinMode( green_pin,  OUTPUT );
-	pinMode( blue_pin,   OUTPUT );
-	pinMode( button_pin, INPUT  );
-	pinMode( water_pin,  INPUT  );
-	pinMode( fan_pin,    OUTPUT );
+	pinMode( red_pin,      OUTPUT );
+	pinMode( green_pin,    OUTPUT );
+	pinMode( blue_pin,     OUTPUT );
+	pinMode( yellow_pin,   OUTPUT );
+	pinMode( button_pin,   INPUT  );
+	pinMode( water_pin,    INPUT  );
+	pinMode( fan_pin,      OUTPUT );
 
-	attachInterrupt( digitalPinToInterrupt( button_pin ), toggleActivity, HIGH );
+	attachInterrupt( digitalPinToInterrupt( button_pin ), toggleActivity, RISING );
 
 	Serial.begin( 9600 );
 	lcd.begin( 16, 2 );
@@ -68,17 +70,25 @@ void setup() {
 }
 
 void loop() {
+	Serial.println( digitalRead( button_pin ) );
 	if ( is_active ) {
 		water_level = getWaterLevel();
 
 		// error state
-		if ( water_level < water_level_min )
+		if ( water_level < water_level_min ) {
+			delay( 500 );
 			errorState();
+		}
+
 		else {
 			// delay for dht sensor
-			delay( 2000 );
-			temp = getTemp();
-			humidity = getHumidity();
+			delay( 1000 );
+			float t = getTemp();
+			float h = getHumidity();
+			if ( !isnan( t ) )
+				temp = t;
+			if ( !isnan( h ) )
+				humidity = h;
 
 			// running state
 			if ( temp > max_temp )
@@ -94,7 +104,7 @@ void loop() {
 
 
 void toggleActivity() {
-	is_active ^= 0x01;
+	is_active ^= true;
 }
 
 int getWaterLevel() {
@@ -103,7 +113,7 @@ int getWaterLevel() {
 }
 
 float getTemp() {
-	return dht.readTempature();
+	return dht.readTemperature();
 }
 
 float getHumidity() {
@@ -131,7 +141,7 @@ void displayTempHumidity() {
 	lcd.print( "Temp: " );
 	lcd.print( temp );
 	lcd.print( ( char ) 223 );
-	lcd.print( "C" )
+	lcd.print( "C" );
 
 	// display humidity
 	lcd.setCursor( 0, 1 );
@@ -149,12 +159,15 @@ void stopDisplay() {
 	lcd.clear();
 }
 
-// DECIDE: will these functions be ran every loop?
+// DECIDE: will these functions be ran every loop? no, need to implement this
 void disabledState() {
-	//turn on yellow light
+	// TODO: disable lcd
+	// turn on yellow light
 	digitalWrite( blue_pin, LOW );
-	digitalWrite( green_pin, HIGH );
-	digitalWrite( red_pin, HIGH );
+	digitalWrite( green_pin, LOW );
+	digitalWrite( red_pin, LOW );
+	digitalWrite( yellow_pin, HIGH );
+
 
 	stopFan();
 
@@ -166,6 +179,7 @@ void idleState() {
 	digitalWrite( blue_pin, LOW );
 	digitalWrite( green_pin, HIGH );
 	digitalWrite( red_pin, LOW );
+	digitalWrite( yellow_pin, LOW );
 
 	recordDate( "Stop fan" ); // TODO: this will be displayed every loop, which is not desired
 	stopFan();
@@ -174,10 +188,11 @@ void idleState() {
 }
 
 void runningState() {
-	//turn on blue light
+	// turn on blue light
 	digitalWrite( red_pin, LOW );
 	digitalWrite( green_pin, LOW );
 	digitalWrite( blue_pin, HIGH );
+	digitalWrite( yellow_pin, LOW );
 
 	recordDate( "Start fan" );
 	startFan();
@@ -186,10 +201,11 @@ void runningState() {
 }
 
 void errorState() {
-	//turn on red light
+	// turn on red light
 	digitalWrite( blue_pin, LOW );
 	digitalWrite( green_pin, LOW );
 	digitalWrite( red_pin, HIGH );
+	digitalWrite( yellow_pin, LOW );
 
 	recordDate( "Stop fan" );
 	stopFan();
