@@ -1,189 +1,198 @@
-//Cooper Flourens & 
-//CPE Project
 
+// Cooper Flourens & Landon Fox
+// CPE Project
 
 
 /* OVERALL TO DO LIST:
  *  Push Date/Time when start and stop
- *  Get Push Button Working
- *  implement LCD Screen showing Temp/Humidity
- *  Fully Troubleshoot Disabled State
- *  Print Error during ERROR state
  *  Angle of Output
- *  Record Time/Date when switching from active mode
  *  Project Overview Document
- *  I may have missed something, I'll come back to this later ~Cooper
  */
 
 
+#include <DHT.h>
+#include <LiquidCrystal.h>
 
-#include <dht.h>
 
-//LED Pins
-int red = A15;
-int green = A14;
-int blue = A13;
-//for yellow, it is red + green led active
-
-//Water Sensor Pin
-int water = A0;
-int level = 0;
-//Water Level Minimum
-int waterLevelMin = 125; 
-
-//Temp/Humidity Sensor Pin
-dht DHT;
-int dhtSensor = 8;
-int x = 30; //minimum temperature
-int y = 20; //maximum temperature
-
-//Fan Pin
-int fanPin = 4;
+// LED Pins
+int red_pin = 4;
+int green_pin = 3;
+int blue_pin = 2;
 
 //Button Info
-int buttonPin = 50;
-int buttonSignal = 0;
-int buttonPrevious = 0;
-int buttonState = 0;
+int button_pin = 6;
+int button_signal = 0;
+int button_previous = 0;
+int button_state = 0;
+volatile bool is_active = true;
 
+// Water Sensor Pin
+int water_pin = A15;
+int water_level = 0;
+// Water Level Minimum
+int water_level_min = 125; 
 
+// Temp/Humidity Sensor Pin
+int dht_pin = 8;
+DHT dht( dht_pin, DHT11 );
+int temp = 0;
+int min_temp = 20;
+int max_temp = 30;
+
+int humidity = 0;
+
+//Fan Pin
+int fan_pin = 4; // TODO: decide fan pin
+
+// LiquidCrystal lcd display
+const int rs = 22, en = 23, d4 = 26, d5 = 27, d6 = 30, d7 = 31;
+LiquidCrystal lcd( rs, en, d4, d5, d6, d7 );
 
 
 void setup() {
-  // get base info from sensors (water level, temperature, humidity)
-  pinMode(red, OUTPUT);
-  pinMode(green, OUTPUT);
-  pinMode(blue, OUTPUT);
-  pinMode(water, INPUT);
-  pinMode(buttonPin, INPUT);
-  pinMode(fanPin, OUTPUT);
+	// get base info from sensors (water level, temperature, humidity)
+	pinMode( red_pin,    OUTPUT );
+	pinMode( green_pin,  OUTPUT );
+	pinMode( blue_pin,   OUTPUT );
+	pinMode( button_pin, INPUT  );
+	pinMode( water_pin,  INPUT  );
+	pinMode( fan_pin,    OUTPUT );
 
-  Serial.begin(9600);
-  
-  // turn on active state for blue LED
-  activeState();
+	attachInterrupt( digitalPinToInterrupt( button_pin ), toggleActivity, HIGH );
+
+	Serial.begin( 9600 );
+	lcd.begin( 16, 2 );
+
+	// turn on idle state
+	idleState();
 }
 
 void loop() {
-  //Delay for the temperature/humidity sensor
-  delay(2000);
+	if ( is_active ) {
+		water_level = getWaterLevel();
 
-  
-  /*Button Press Attempt
-  buttonPrevious = buttonSignal;
-  buttonSignal = digitalRead(buttonPin);
-  if(buttonSignal != buttonPrevious) {
-    //in the situation the button has been pressed
-    while(buttonSignal != buttonPrevious) {
-      disabledState();
-      buttonPrevious = buttonSignal;
-      buttonSignal = digitalRead(buttonPin);
-    }
-    idleState();
-  }*/
+		// error state
+		if ( water_level < water_level_min )
+			errorState();
+		else {
+			// delay for dht sensor
+			delay( 2000 );
+			temp = getTemp();
+			humidity = getHumidity();
 
-  
-  // Water Level Processes
-
-  if (waterLevelCheck() < waterLevelMin) {
-    errorState();
-    idleState();
-  }
-
-
-
-
-
-
-  //MY TEMPERATURE HUMIDITY SENSOR IS BROKEN, theoretically this works tho
-
-
-  
-  //Temperature processes
-  DHT.read11(dhtSensor);
-  Serial.print("Temperature - ");
-  float temperature = DHT.temperature;
-  Serial.println(temperature);
-
-  //x and y need to be defined at header or input here
-  if (temperature > x && temperature < y) {
-    activeState();
-  } else {
-    idleState();
-  }
-
-
-
-
-  //Humidity Processes
-  Serial.print("Humidity - ");
-  Serial.println(DHT.humidity);
-  //display humidity to screen instead of console
-
-  
-  // angle of output control
-  // up and down button? joystick maybe?
-  //disabled state
-
-
-
-  
+			// running state
+			if ( temp > max_temp )
+				runningState();
+			// idle state
+			else if ( temp < min_temp )
+				idleState();
+		}
+	}
+	else
+		disabledState();
 }
 
-int waterLevelCheck() {
-  level = analogRead(water);
-  return level;
+
+void toggleActivity() {
+	is_active ^= 0x01;
+}
+
+int getWaterLevel() {
+	water_level = analogRead( water_pin );
+	return water_level;
+}
+
+float getTemp() {
+	return dht.readTempature();
+}
+
+float getHumidity() {
+	return dht.readHumidity();
 }
 
 //needs to be implemented
 void startFan() {
-  digitalWrite(fanPin, HIGH);
+	digitalWrite( fan_pin, HIGH );
 }
 
 //needs to be implemented
 void stopFan() {
-  digitalWrite(fanPin, LOW);
+	digitalWrite( fan_pin, LOW );
 }
 
 //needs to be implemented
-void recordDate() {
-  // push time and date to host computer
+void recordDate( char* string ) {
+	// push time and date to host computer using I^2C
 }
 
+void displayTempHumidity() {
+	// display temp
+	stopDisplay();
+	lcd.print( "Temp: " );
+	lcd.print( temp );
+	lcd.print( ( char ) 223 );
+	lcd.print( "C" )
 
-
-void activeState() {
-   //turn on blue light
-   digitalWrite(red, LOW);
-   digitalWrite(green, LOW);
-   digitalWrite(blue, HIGH);
-   //turn on fan
-   startFan();
+	// display humidity
+	lcd.setCursor( 0, 1 );
+	lcd.print( "Humidity: " );
+	lcd.print( humidity );
+	lcd.print( "%" );
 }
 
+void displayError() {
+	stopDisplay();
+	lcd.print( "Error: Low water" );
+}
+
+void stopDisplay() {
+	lcd.clear();
+}
+
+// DECIDE: will these functions be ran every loop?
 void disabledState() {
-  //turn on yellow light
-  digitalWrite(blue, LOW);
-  digitalWrite(green, HIGH);
-  digitalWrite(red, HIGH);
-  stopFan();
+	//turn on yellow light
+	digitalWrite( blue_pin, LOW );
+	digitalWrite( green_pin, HIGH );
+	digitalWrite( red_pin, HIGH );
+
+	stopFan();
+
+	stopDisplay();
 }
 
 void idleState() {
-  //turn on yellow light
-  digitalWrite(blue, LOW);
-  digitalWrite(green, HIGH);
-  digitalWrite(red, HIGH);
-  stopFan();
+	// turn on green light
+	digitalWrite( blue_pin, LOW );
+	digitalWrite( green_pin, HIGH );
+	digitalWrite( red_pin, LOW );
+
+	recordDate( "Stop fan" ); // TODO: this will be displayed every loop, which is not desired
+	stopFan();
+
+	displayTempHumidity();
+}
+
+void runningState() {
+	//turn on blue light
+	digitalWrite( red_pin, LOW );
+	digitalWrite( green_pin, LOW );
+	digitalWrite( blue_pin, HIGH );
+
+	recordDate( "Start fan" );
+	startFan();
+
+	displayTempHumidity();
 }
 
 void errorState() {
-  stopFan();
-  while(waterLevelCheck() < 300) {
-  //turn on red light
-  digitalWrite(blue, LOW);
-  digitalWrite(green, LOW);
-  digitalWrite(red, HIGH);
-  //display ERROR
-  }
+	//turn on red light
+	digitalWrite( blue_pin, LOW );
+	digitalWrite( green_pin, LOW );
+	digitalWrite( red_pin, HIGH );
+
+	recordDate( "Stop fan" );
+	stopFan();
+
+	displayError();
 }
