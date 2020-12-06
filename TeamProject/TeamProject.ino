@@ -5,12 +5,12 @@
 
 /* OVERALL TO DO LIST:
  *  Push Date/Time when start and stop
- *  Angle of Output
  *  Project Overview Document
  */
 
 
 #include <DHT.h>
+#include <Servo.h>
 #include <LiquidCrystal.h>
 
 
@@ -22,8 +22,7 @@ int yellow_pin = 8;
 
 //Button Info
 int button_pin = 2;
-int button_signal = 0;
-int button_previous = 0;
+volatile int button_previous = 0;
 int button_state = 0;
 volatile bool is_active = true;
 
@@ -31,19 +30,26 @@ volatile bool is_active = true;
 int water_pin = A15;
 int water_level = 0;
 // Water Level Minimum
-int water_level_min = 125; 
+int water_level_min = 200; 
 
 // Temp/Humidity Sensor Pin
 int dht_pin = 3;
 DHT dht( dht_pin, DHT11 );
 int temp = 0;
-int min_temp = 10;
-int max_temp = 15;
+int min_temp = -10;
+int max_temp = 0;
 
 int humidity = 0;
 
-//Fan Pin
-int fan_pin = 4; // TODO: decide fan pin
+// Fan Pin
+int fan_pin = 41; // TODO: decide fan pin
+
+// Servo
+int servo_pin = 35;
+Servo servo;
+
+// servo pot pin
+int pot_pin = A2;
 
 // LiquidCrystal lcd display
 const int rs = 22, en = 23, d4 = 26, d5 = 27, d6 = 30, d7 = 31;
@@ -59,18 +65,22 @@ void setup() {
 	pinMode( button_pin,   INPUT  );
 	pinMode( water_pin,    INPUT  );
 	pinMode( fan_pin,      OUTPUT );
+	pinMode( pot_pin,      INPUT  );
 
-	attachInterrupt( digitalPinToInterrupt( button_pin ), toggleActivity, RISING );
+	attachInterrupt( digitalPinToInterrupt( button_pin ), toggleActivity, FALLING );
 
 	Serial.begin( 9600 );
+
 	lcd.begin( 16, 2 );
+
+	servo.attach( servo_pin );
 
 	// turn on idle state
 	idleState();
 }
 
 void loop() {
-	Serial.println( digitalRead( button_pin ) );
+	Serial.println( temp );
 	if ( is_active ) {
 		water_level = getWaterLevel();
 
@@ -100,11 +110,19 @@ void loop() {
 	}
 	else
 		disabledState();
+	// startFan();
+
+	// adjust vent
+	servo.write( analogRead( pot_pin ) );
 }
 
 
 void toggleActivity() {
-	is_active ^= true;
+	if ( button_previous - millis() > 200 )
+	{
+		is_active ^= true;
+		button_previous = millis();
+	}
 }
 
 int getWaterLevel() {
@@ -161,13 +179,11 @@ void stopDisplay() {
 
 // DECIDE: will these functions be ran every loop? no, need to implement this
 void disabledState() {
-	// TODO: disable lcd
 	// turn on yellow light
 	digitalWrite( blue_pin, LOW );
 	digitalWrite( green_pin, LOW );
 	digitalWrite( red_pin, LOW );
 	digitalWrite( yellow_pin, HIGH );
-
 
 	stopFan();
 
