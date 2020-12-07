@@ -2,62 +2,62 @@
 // Cooper Flourens & Landon Fox
 // CPE Project
 
-
-/* OVERALL TO DO LIST:
- *  Push Date/Time when start and stop
- *  Project Overview Document
- */
-
-
+#include <Wire.h>
+#include <DS3231.h>
 #include <DHT.h>
 #include <Servo.h>
 #include <LiquidCrystal.h>
 
 
-// LED Pins
-int red_pin = 11;
-int green_pin = 10;
-int blue_pin = 9;
-int yellow_pin = 8;
+// led pins
+const int red_pin = 11;
+const int green_pin = 10;
+const int blue_pin = 9;
+const int yellow_pin = 8;
 
-//Button Info
-int button_pin = 2;
+// button
+const int button_pin = 2;
 volatile int button_previous = 0;
-int button_state = 0;
+
+// states: idle = 0, running = 1, error = 2, disabled = 3
 volatile bool is_active = true;
+int prev_state = 4;
+int current_state = 0;
 
-// Water Sensor Pin
-int water_pin = A15;
+// clock
+DS3231 clock;
+RTCDateTime dt;
+
+// water sensor
+const int water_pin = A15;
 int water_level = 0;
-// Water Level Minimum
-int water_level_min = 200; 
+const int water_level_min = 200; // due to water corrosion of water sensor, this may need modification
 
-// Temp/Humidity Sensor Pin
-int dht_pin = 3;
+// temp and humidity sensor
+const int dht_pin = 3;
 DHT dht( dht_pin, DHT11 );
 int temp = 0;
-int min_temp = -10;
-int max_temp = 0;
-
+const int min_temp = -10;
+const int max_temp = 0;
 int humidity = 0;
 
-// Fan Pin
-int fan_pin = 41; // TODO: decide fan pin
+// fan
+const int fan_pin = 41;
 
-// Servo
-int servo_pin = 35;
+// servo
+const int servo_pin = 35;
 Servo servo;
 
 // servo pot pin
-int pot_pin = A2;
+const int pot_pin = A2;
 
-// LiquidCrystal lcd display
+// lcd display
 const int rs = 22, en = 23, d4 = 26, d5 = 27, d6 = 30, d7 = 31;
 LiquidCrystal lcd( rs, en, d4, d5, d6, d7 );
 
 
 void setup() {
-	// get base info from sensors (water level, temperature, humidity)
+	// set pins to input/output mode
 	pinMode( red_pin,      OUTPUT );
 	pinMode( green_pin,    OUTPUT );
 	pinMode( blue_pin,     OUTPUT );
@@ -67,25 +67,35 @@ void setup() {
 	pinMode( fan_pin,      OUTPUT );
 	pinMode( pot_pin,      INPUT  );
 
+	// attach iterrupt to button to enable/disable on falling edge
 	attachInterrupt( digitalPinToInterrupt( button_pin ), toggleActivity, FALLING );
 
+	// begin serial
 	Serial.begin( 9600 );
 
+	// begin clock
+	clock.begin();
+	clock.setDateTime( __DATE__, __TIME__ );
+
+	// lcd begin
 	lcd.begin( 16, 2 );
 
+	// attach servo to respective pin
 	servo.attach( servo_pin );
 
-	// turn on idle state
+	// idle state
 	idleState();
 }
 
 void loop() {
-	Serial.println( temp );
+	// if the system is active, consider active states
 	if ( is_active ) {
+		// get water level
 		water_level = getWaterLevel();
 
 		// error state
 		if ( water_level < water_level_min ) {
+			current_state = 2;
 			delay( 500 );
 			errorState();
 		}
@@ -93,66 +103,86 @@ void loop() {
 		else {
 			// delay for dht sensor
 			delay( 1000 );
+			// get temp and humidity and ensure there are not nan
 			float t = getTemp();
 			float h = getHumidity();
 			if ( !isnan( t ) )
 				temp = t;
 			if ( !isnan( h ) )
 				humidity = h;
+			// display temp and humidity on lcd
+			displayTempHumidity();
 
 			// running state
-			if ( temp > max_temp )
+			if ( temp > max_temp ) {
+				current_state = 1;
 				runningState();
+			}
 			// idle state
-			else if ( temp < min_temp )
+			else if ( temp < min_temp ) {
+				current_state = 0;
 				idleState();
+			}
 		}
 	}
-	else
+	// if system is not active, go to disabled state
+	else {
+		current_state = 3;
 		disabledState();
-	// startFan();
+	}
 
 	// adjust vent
 	servo.write( analogRead( pot_pin ) );
 }
 
 
+// toggles is_active when button is pressed, used via interrupt
 void toggleActivity() {
-	if ( button_previous - millis() > 200 )
-	{
+	// prevent button presses within 200 ms to debounce
+	if ( button_previous - millis() > 200 ) {
 		is_active ^= true;
 		button_previous = millis();
 	}
 }
 
+// returns current water level
 int getWaterLevel() {
-	water_level = analogRead( water_pin );
-	return water_level;
+	return analogRead( water_pin );
 }
 
+// returns current temp
 float getTemp() {
 	return dht.readTemperature();
 }
 
+// returns current humidity
 float getHumidity() {
 	return dht.readHumidity();
 }
 
-//needs to be implemented
+// starts fan
 void startFan() {
 	digitalWrite( fan_pin, HIGH );
 }
 
-//needs to be implemented
+// stops fan
 void stopFan() {
 	digitalWrite( fan_pin, LOW );
 }
 
-//needs to be implemented
-void recordDate( char* string ) {
-	// push time and date to host computer using I^2C
+// records date to Serial, format: "y-m-d h:m:s; string"
+void recordDate( const char* string ) {
+	dt = clock.getDateTime();
+	Serial.print( dt.year );   Serial.print( "-"  );
+	Serial.print( dt.month );  Serial.print( "-"  );
+	Serial.print( dt.day );    Serial.print( " "  );
+	Serial.print( dt.hour );   Serial.print( ":"  );
+	Serial.print( dt.minute ); Serial.print( ":"  );
+	Serial.print( dt.second ); Serial.print( "; " );
+	Serial.println( string );
 }
 
+// displays temp and humidity to lcd, format: "Temp: temp(deg)C\nHumidity: humidity%"
 void displayTempHumidity() {
 	// display temp
 	stopDisplay();
@@ -168,63 +198,92 @@ void displayTempHumidity() {
 	lcd.print( "%" );
 }
 
+// displays error to lcd, format: "Error: Low water"
 void displayError() {
 	stopDisplay();
 	lcd.print( "Error: Low water" );
 }
 
+// clears lcd
 void stopDisplay() {
 	lcd.clear();
 }
 
-// DECIDE: will these functions be ran every loop? no, need to implement this
+
+// start disabled state
 void disabledState() {
-	// turn on yellow light
-	digitalWrite( blue_pin, LOW );
-	digitalWrite( green_pin, LOW );
-	digitalWrite( red_pin, LOW );
-	digitalWrite( yellow_pin, HIGH );
+	if ( prev_state != current_state ) {
+		// turn on yellow light
+		digitalWrite( blue_pin,   LOW  );
+		digitalWrite( green_pin,  LOW  );
+		digitalWrite( red_pin,    LOW  );
+		digitalWrite( yellow_pin, HIGH );
 
-	stopFan();
+		// stop fan and record
+		recordDate( "Stop fan" );
+		stopFan();
 
-	stopDisplay();
+		// stop display
+		stopDisplay();
+
+		// update state
+		prev_state = current_state;
+	}
 }
 
+// start idle state
 void idleState() {
-	// turn on green light
-	digitalWrite( blue_pin, LOW );
-	digitalWrite( green_pin, HIGH );
-	digitalWrite( red_pin, LOW );
-	digitalWrite( yellow_pin, LOW );
+	if ( prev_state != current_state ) {
+		// turn on green light
+		digitalWrite( blue_pin,   LOW  );
+		digitalWrite( green_pin,  HIGH );
+		digitalWrite( red_pin,    LOW  );
+		digitalWrite( yellow_pin, LOW  );
 
-	recordDate( "Stop fan" ); // TODO: this will be displayed every loop, which is not desired
-	stopFan();
+		// stop fan and record
+		recordDate( "Stop fan" );
+		stopFan();
 
-	displayTempHumidity();
+		// update state
+		prev_state = current_state;
+	}
 }
 
+// start running state
 void runningState() {
-	// turn on blue light
-	digitalWrite( red_pin, LOW );
-	digitalWrite( green_pin, LOW );
-	digitalWrite( blue_pin, HIGH );
-	digitalWrite( yellow_pin, LOW );
+	if ( prev_state != current_state ) {
+		// turn on blue light
+		digitalWrite( red_pin,    LOW  );
+		digitalWrite( green_pin,  LOW  );
+		digitalWrite( blue_pin,   HIGH );
+		digitalWrite( yellow_pin, LOW  );
 
-	recordDate( "Start fan" );
-	startFan();
+		// start fan and record
+		recordDate( "Start fan" );
+		startFan();
 
-	displayTempHumidity();
+		// update state
+		prev_state = current_state;
+	}
 }
 
+// start error state
 void errorState() {
-	// turn on red light
-	digitalWrite( blue_pin, LOW );
-	digitalWrite( green_pin, LOW );
-	digitalWrite( red_pin, HIGH );
-	digitalWrite( yellow_pin, LOW );
+	if ( prev_state != current_state ) {
+		// turn on red light
+		digitalWrite( blue_pin,   LOW  );
+		digitalWrite( green_pin,  LOW  );
+		digitalWrite( red_pin,    HIGH );
+		digitalWrite( yellow_pin, LOW  );
 
-	recordDate( "Stop fan" );
-	stopFan();
+		// stop fan
+		recordDate( "Stop fan" );
+		stopFan();
 
-	displayError();
+		// display error
+		displayError();
+
+		// update state
+		prev_state = current_state;
+	}
 }
